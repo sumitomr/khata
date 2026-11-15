@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#15803d">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<title>Pocket Money Diary</title>
+<style>
+:root{--g:#15803d;--r:#b91c1c;--t:#1f2937;--m:#6b7280;--l:#e5e7eb}
+*{box-sizing:border-box}
+body{margin:0;background:#fff;color:var(--t);font:15px/1.4 system-ui,sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+main{max-width:640px;margin:auto;padding:12px}
+.bal{text-align:center;padding:12px 0 6px}.bal small{color:var(--m);font-size:13px}
+.bal b{display:block;font-size:46px;line-height:1.15}
+.sum{display:flex;gap:8px}.sum div{flex:1;border:1px solid var(--l);border-radius:8px;padding:6px;text-align:center;font-size:12px;color:var(--m)}
+.sum b{display:block;font-size:15px;color:var(--t)}
+.g{color:var(--g)}.r{color:var(--r)}
+button{font:inherit;padding:12px;border-radius:10px;border:1px solid #cbd5e1;background:#fff;color:var(--t)}
+.gb{background:var(--g);border-color:var(--g);color:#fff}.rb{background:var(--r);border-color:var(--r);color:#fff}
+.row{display:flex;gap:8px;margin:12px 0}.row>button{flex:1;font-weight:600}
+.chips{display:flex;gap:6px;overflow-x:auto;margin:8px 0}
+.chips button{padding:7px 12px;border-radius:99px;white-space:nowrap;font-size:13px}.chips .on{background:var(--t);color:#fff}
+.tw{overflow-x:auto;border:1px solid var(--l);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:7px 6px;text-align:right;border-bottom:1px solid var(--l);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+.led th:nth-child(2),.led td:nth-child(2){text-align:left;white-space:normal;min-width:90px}
+th{background:#f9fafb;color:var(--m);font-size:12px}
+td i{color:var(--m);font-size:11px;font-style:normal}
+.led tbody tr{cursor:pointer}
+.ft{display:flex;align-items:center;justify-content:space-between;margin:14px 0;font-size:13px;color:var(--m)}
+dialog{border:0;border-radius:12px;padding:16px;width:min(92vw,380px)}dialog::backdrop{background:#0006}
+h2{margin:0 0 4px;font-size:18px}
+label{display:block;margin-top:10px;font-size:13px;color:var(--m)}
+input,select{width:100%;padding:10px;font-size:16px;border:1px solid #cbd5e1;border-radius:8px;margin-top:4px;background:#fff}
+dialog button{width:100%;margin-top:8px}.two{display:flex;gap:8px}
+#setup{position:fixed;inset:0;background:#fff;z-index:9;display:flex;align-items:center;padding:24px}#setup[hidden]{display:none}
+#setup>div{width:100%;max-width:380px;margin:auto}
+</style></head><body>
+<main>
+<div class="bal"><small>MY CURRENT BALANCE</small><b id="bal"></b></div>
+<div class="sum"><div>Received<b id="rc" class="g"></b></div><div>Spent<b id="sp" class="r"></b></div><div id="opb">Opening (tap to change)<b id="op"></b></div></div>
+<div class="row"><button class="gb" id="bc">+ Money Received</button><button class="rb" id="bs">− Money Spent</button></div>
+<div class="chips" id="chips"></div>
+<div class="row" style="margin:4px 0 8px"><button id="vw"></button></div>
+<div class="tw"><table id="tb"></table></div>
+<div class="ft"><span id="lb"></span><button id="bk" style="width:auto;padding:8px 12px">Backup &amp; Restore</button></div>
+</main>
+
+<dialog id="ed"><form id="f">
+<h2 id="eh"></h2>
+<label>Amount (₹)<input id="am" type="number" inputmode="decimal" step="0.01" min="0.01" required></label>
+<label><span id="cl"></span><select id="ct"></select></label>
+<label>Short description (optional)<input id="nt" maxlength="80"></label>
+<label>Date &amp; time<input id="dt" type="datetime-local" required></label>
+<button class="gb" id="sv">Save</button>
+<button type="button" id="cx">Cancel</button>
+<button type="button" id="dl" class="r" hidden>Delete this entry</button>
+</form></dialog>
+
+<dialog id="bd"><h2>Backup &amp; Restore</h2>
+<button class="gb" id="bj">Download full backup (JSON)</button>
+<button id="bv">Export transactions (CSV)</button>
+<button id="br">Restore from backup file…</button>
+<input id="rs" type="file" accept=".json,application/json" hidden>
+<button id="bx">Close</button></dialog>
+
+<div id="setup" hidden><div>
+<h2>Welcome</h2><p>How much money do you have right now?</p>
+<label>Opening balance (₹)<input id="ob" type="number" inputmode="decimal" step="0.01"></label>
+<button class="gb" id="ok" style="width:100%;margin-top:12px">Start</button></div></div>
+
+<script>
+/*CORE*/
+const money=p=>(p<0?'-':'')+'₹'+(Math.abs(p)/100).toLocaleString('en-IN',{minimumFractionDigits:p%100?2:0,maximumFractionDigits:2});
+const toPaise=v=>Math.round(parseFloat(v)*100);
+const loc=ts=>new Date(ts-new Date(ts).getTimezoneOffset()*60000).toISOString().slice(0,16);
+const sameDay=(a,b)=>new Date(a).toDateString()===new Date(b).toDateString();
+function ledger(d){let b=d.opening;return [...d.tx].sort((a,c)=>a.ts-c.ts||a.id-c.id).map(t=>{b+=t.type==='c'?t.amt:-t.amt;return{...t,bal:b}})}
+function totals(d){let c=0,x=0;d.tx.forEach(t=>t.type==='c'?c+=t.amt:x+=t.amt);return{c,x,bal:d.opening+c-x}}
+function keep(t,f,now){
+ if(f==='all')return true;if(f==='c'||f==='d')return t.type===f;
+ if(f==='today')return sameDay(t.ts,now);
+ const a=new Date(t.ts),b=new Date(now);return a.getMonth()===b.getMonth()&&a.getFullYear()===b.getFullYear()}
+function validBackup(o){return !!o&&typeof o==='object'&&Number.isInteger(o.opening)&&Array.isArray(o.tx)&&
+ o.tx.every(t=>t&&(t.type==='c'||t.type==='d')&&Number.isInteger(t.amt)&&t.amt>0&&Number.isFinite(t.ts))}
+const newId=()=>Date.now()*1000+Math.floor(Math.random()*1000);
+const norm=a=>a.map((t,i)=>({id:t.id||newId()+i,type:t.type,amt:t.amt,cat:String(t.cat||''),note:String(t.note||''),ts:t.ts}));
+function csv(d){const q=s=>'"'+String(s).replace(/"/g,'""')+'"';
+ const r=[['Date','Time','Type','Category','Description','Credit','Debit','Balance']];
+ ledger(d).forEach(t=>r.push([loc(t.ts).slice(0,10),loc(t.ts).slice(11),t.type==='c'?'Credit':'Debit',t.cat,t.note,t.type==='c'?t.amt/100:'',t.type==='d'?t.amt/100:'',t.bal/100]));
+ return '\ufeff'+r.map(x=>x.map(q).join(',')).join('\r\n')}
+/*END*/
+
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const KEY='moneyDiary.v1',FL=[['all','All'],['c','Money Received'],['d','Money Spent'],['today','Today'],['month','This Month']];
+const CAT={c:['Home','Father','Mother','Other'],d:['Food','Travel','Shopping','Recharge','Other']};
+let F='all',V=0,edit=null,kind='c',def='';
+function load(){const raw=localStorage.getItem(KEY);if(!raw)return{opening:null,tx:[]};
+ try{const s=JSON.parse(raw);if(validBackup(s))return s}catch(e){}
+ try{localStorage.setItem(KEY+'.damaged',raw)}catch(e){}
+ alert('Your saved data could not be read. A copy was kept safely; please restore from a backup file.');return{opening:null,tx:[]}}
+let D=load();
+function save(){try{localStorage.setItem(KEY,JSON.stringify(D))}catch(e){alert('Could not save! Please download a backup now.')}}
+const fd=ts=>new Date(ts).toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+const ft=ts=>new Date(ts).toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit'});
+
+function render(){
+ $('setup').hidden=D.opening!==null;if(D.opening===null)return;
+ const T=totals(D);$('bal').textContent=money(T.bal);$('bal').className=T.bal<0?'r':'';
+ $('rc').textContent=money(T.c);$('sp').textContent=money(T.x);$('op').textContent=money(D.opening);
+ $('chips').innerHTML=FL.map(([k,n])=>`<button data-f="${k}" class="${k===F?'on':''}">${n}</button>`).join('');
+ $('vw').textContent=V?'Showing: date-wise summary (tap for ledger)':'Showing: ledger (tap for date-wise summary)';
+ const now=Date.now(),L=ledger(D).reverse().filter(t=>keep(t,F,now));let h;
+ $('tb').className=V?'':'led';
+ if(!V){h='<thead><tr><th>Date</th><th>Description</th><th>Credit (+)</th><th>Debit (−)</th><th>Balance</th></tr></thead><tbody>'+
+  (L.map(t=>`<tr data-id="${t.id}"><td>${fd(t.ts)}<br><i>${ft(t.ts)}</i></td><td>${esc(t.cat+(t.note?' · '+t.note:''))}</td><td class="g">${t.type==='c'?money(t.amt):'—'}</td><td class="r">${t.type==='d'?money(t.amt):'—'}</td><td><b>${money(t.bal)}</b></td></tr>`).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--m)">No entries yet. Tap a button above to add one.</td></tr>')+'</tbody>'}
+ else{const g=[];L.forEach(t=>{const k=new Date(t.ts).toDateString();let o=g[g.length-1];if(!o||o.k!==k){o={k,ts:t.ts,c:0,x:0,b:t.bal};g.push(o)}t.type==='c'?o.c+=t.amt:o.x+=t.amt});
+  h='<thead><tr><th>Date</th><th>Received</th><th>Spent</th><th>Balance</th></tr></thead><tbody>'+
+  (g.map(o=>`<tr><td>${new Date(o.ts).toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'})}</td><td class="g">${o.c?money(o.c):'—'}</td><td class="r">${o.x?money(o.x):'—'}</td><td><b>${money(o.b)}</b></td></tr>`).join('')||'<tr><td colspan="4" style="text-align:center;color:var(--m)">No entries yet.</td></tr>')+'</tbody>'}
+ $('tb').innerHTML=h;
+ $('lb').innerHTML=D.lastBackup?'Last backup: '+fd(D.lastBackup):'<span class="r">⚠ No backup yet</span>';
+}
+function openEd(type,t){kind=type;edit=t||null;
+ $('eh').textContent=(t?'Edit: ':'')+(type==='c'?'Money Received (+)':'Money Spent (−)');
+ $('cl').textContent=type==='c'?'Received from':'Spent on';
+ const L=CAT[type].slice();if(t&&!L.includes(t.cat))L.push(t.cat);
+ $('ct').innerHTML=L.map(c=>`<option>${esc(c)}</option>`).join('');
+ $('am').value=t?t.amt/100:'';$('ct').value=t?t.cat:L[0];$('nt').value=t?t.note:'';
+ $('dt').value=def=loc(t?t.ts:Date.now());$('dl').hidden=!t;$('ed').showModal()}
+$('bc').onclick=()=>openEd('c');$('bs').onclick=()=>openEd('d');
+$('cx').onclick=()=>$('ed').close();
+$('tb').onclick=e=>{const r=e.target.closest('tr[data-id]');if(!r)return;const t=D.tx.find(x=>x.id==r.dataset.id);if(t)openEd(t.type,t)};
+$('chips').onclick=e=>{const k=e.target.dataset.f;if(k){F=k;render()}};
+$('vw').onclick=()=>{V=1-V;render()};
+$('f').onsubmit=e=>{e.preventDefault();const a=toPaise($('am').value);if(!(a>0))return alert('Enter an amount above 0.');
+ const v=$('dt').value,ts=v===def?(edit?edit.ts:Date.now()):new Date(v).getTime();
+ if(!Number.isFinite(ts))return alert('Please check the date.');
+ const o={type:kind,amt:a,cat:$('ct').value,note:$('nt').value.trim(),ts};
+ if(edit)Object.assign(edit,o);else D.tx.push({id:newId(),...o});
+ save();$('ed').close();render()};
+$('dl').onclick=()=>{if(confirm('Delete this entry? All balances will be recalculated.')){D.tx=D.tx.filter(t=>t!==edit);save();$('ed').close();render()}};
+$('ok').onclick=()=>{const p=toPaise($('ob').value);if(!Number.isFinite(p))return alert('Enter your opening balance (0 is fine).');D.opening=p;save();render()};
+$('opb').onclick=()=>{const v=prompt('Opening balance (₹). Your entries are kept and all balances update.',D.opening/100);if(v===null)return;
+ const p=toPaise(v);if(!Number.isFinite(p))return alert('Please enter a number.');D.opening=p;save();render()};
+function dl(name,text,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),5000)}
+const stamp=()=>loc(Date.now()).slice(0,10);
+const backupText=()=>JSON.stringify({app:'money-diary',version:1,exportedAt:new Date().toISOString(),opening:D.opening,tx:D.tx},null,1);
+$('bk').onclick=()=>$('bd').showModal();$('bx').onclick=()=>$('bd').close();
+$('bj').onclick=()=>{dl(`money-diary-backup-${stamp()}.json`,backupText(),'application/json');D.lastBackup=Date.now();save();render()};
+$('bv').onclick=()=>dl(`money-diary-${stamp()}.csv`,csv(D),'text/csv');
+$('br').onclick=()=>$('rs').click();
+$('rs').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;let o;
+ try{o=JSON.parse(await f.text())}catch(_){return alert('This file is not a valid backup.')}
+ if(!validBackup(o))return alert('This file is not a valid Money Diary backup. Nothing was changed.');
+ if(!confirm(`Replace your current data (${D.tx.length} entries) with this backup (${o.tx.length} entries)?`))return;
+ if(D.tx.length)dl(`money-diary-before-restore-${stamp()}.json`,backupText(),'application/json');
+ D={opening:o.opening,tx:norm(o.tx),lastBackup:D.lastBackup};save();$('bd').close();render();alert('Backup restored.')};
+render();
+if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
+if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('sw.js');
+</script></body></html>
